@@ -8,10 +8,11 @@ const html = `
     border-radius: 5px;
     background-color: rgba(111, 111, 111, 0.5);
     box-sizing: border-box;
-    width: 300px;
   }
   .extendedh body, .extendedh #wrapper { width: 100%; }
   .extendedv body, .extendedv #wrapper { height: 100%; }
+  ::-webkit-scrollbar { width: 8px; background: gray; }
+  ::-webkit-scrollbar-thumb { border-radius: 4px; background: red; }
 </style>
 <div id="wrapper">
   <h1>The Incredible ISS</h1>
@@ -20,7 +21,9 @@ const html = `
   <p>Altitude: <span id="alt">-</span>km</p>
   <p>
     <button id="update">Update</button>
-    <button id="jump">Reset</button>
+    <button id="jump">Jump</button>
+    <button id="follow">Follow</button>
+    <button id="resize">Resize</button>
   </p>
 </div>
 <script>
@@ -38,7 +41,7 @@ const html = `
   };
 
   const send = () => {
-    parent.postMessage({ lat, lng, alt }, "*");
+    parent.postMessage({ type: "fly", lat, lng, alt }, "*");
   };
 
   // document.getElementById("update").addEventListener("click", update);
@@ -64,10 +67,33 @@ const html = `
 
   updateExtended(${JSON.stringify(reearth.widget.extended || null)});
   update();
+
+  let timer;
+  document.getElementById("follow").addEventListener("click", (e) => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = undefined;
+      e.currentTarget.textContent = "Follow";
+      return;
+    }
+    const cb = () => update().then(() => {
+      send();
+      if (timer) timer = setTimeout(cb, 3000);
+    });
+    timer = 1;
+    cb();
+    e.currentTarget.textContent = "Unfollow";
+  });
+
+  let folded = true;
+  document.getElementById("resize").addEventListener("click", (e) => {
+    folded = !folded;
+    parent.postMessage({ type: "resize", folded }, "*");
+  });
 </script>
 `;
 
-reearth.ui.show(html);
+reearth.ui.show(html, { width: 300 });
 
 reearth.on("update", () => {
   reearth.ui.postMessage({
@@ -76,14 +102,27 @@ reearth.on("update", () => {
 });
 
 reearth.on("message", msg => {
-  reearth.visualizer.camera.flyTo({
-    lat: msg.lat,
-    lng: msg.lng,
-    height: msg.alt,
-    heading: 0,
-    pitch: -Math.PI/2,
-    roll: 0,
-  }, {
-    duration: 2
-  });
+  if (msg.type === "fly") {
+    reearth.visualizer.camera.flyTo({
+      lat: msg.lat,
+      lng: msg.lng,
+      height: msg.alt + 1000,
+      heading: 0,
+      pitch: -Math.PI/2,
+      roll: 0,
+    }, {
+      duration: 2
+    });
+    const layer = reearth.layers.find(l => l.type === "model" && l.title === "ISS");
+    if (layer) {
+      reearth.layers.overrideProperty(layer.id, {
+        default: {
+          location: { lat: msg.lat, lng: msg.lng },
+          height: msg.alt
+        }
+      });
+    }
+  } else if (msg.type === "resize") {
+    reearth.ui.resize?.(msg.folded ? 300 : 500, undefined, msg.folded ? undefined : true);
+  }
 });
